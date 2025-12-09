@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="model0">
+  <joint name="FixedJoint" type="fixed">
+    <origin xyz="0. 0. -0." rpy="0. 0. 0."/>
+    <parent link="scoop"/>
+    <child link="end_point"/>
+  </joint>
+  <joint name="fix_to_scene" type="fixed">
+    <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+    <parent link="test_bench"/>
+    <child link="mountboom"/>
+  </joint>
+  <joint name="revolute_lift" type="revolute">
+    <origin xyz="0.034 0. 0.0625" rpy="0. 0. 0."/>
+    <parent link="mountboom"/>
+    <child link="liftboom"/>
+    <axis xyz="0. 1. 0."/>
+    <limit lower="0." upper="1.6057029" effort="10000000." velocity="0.3490659"/>
+  </joint>
+  <joint name="revolute_scoop" type="revolute">
+    <origin xyz="0.25 0. 0. " rpy="0. -1.5707964 0. "/>
+    <parent link="tiltboom"/>
+    <child link="scoop"/>
+    <axis xyz="0. 1. 0."/>
+    <limit lower="-1.2217305" upper="1.9198622" effort="10000000." velocity="0.3490659"/>
+  </joint>
+  <joint name="revolute_tilt" type="revolute">
+    <origin xyz="0.20564 0. 0.420085" rpy="0. 0. 0."/>
+    <parent link="liftboom"/>
+    <child link="tiltboom"/>
+    <axis xyz="0. 1. 0."/>
+    <limit lower="-0.4886922" upper="1.4835297" effort="10000000." velocity="0.3490659"/>
+  </joint>
+  <link name="end_point">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="0.01"/>
+      <inertia ixx="0.0000006" ixy="0." ixz="0." iyy="0.0000004" iyz="0." izz="0.0000007"/>
+    </inertial>
+  </link>
+  <link name="liftboom">
+    <inertial>
+      <origin xyz="0.0623874 0.0029557 0.2278545" rpy="0. 0. 0."/>
+      <mass value="1.3268"/>
+      <inertia ixx="0.0218668" ixy="-0.000021" ixz="-0.0100845" iyy="0.0277166" iyz="-0.0001026" izz="0.0067434"/>
+    </inertial>
+    <visual>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="file:./meshes/liftboom_visuals.obj" scale="1. 1. 1."/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="file:./meshes/liftboom_collisions.obj" scale="1. 1. 1."/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="mountboom">
+    <inertial>
+      <origin xyz="0.0296252 0. 0.0397362" rpy="0. 0. 0."/>
+      <mass value="1."/>
+      <inertia ixx="0.0011918" ixy="0." ixz="0." iyy="0.0010426" iyz="0." izz="0.0011953"/>
+    </inertial>
+    <visual>
+      <origin xyz="0. 0. 0." rpy="0. 0. 1.5707964"/>
+      <geometry>
+        <mesh filename="file:./meshes/mountboom_visuals.obj" scale="1. 1. 1."/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. 1.5707964"/>
+      <geometry>
+        <mesh filename="file:./meshes/mountboom_collisions.obj" scale="1. 1. 1."/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="scoop">
+    <inertial>
+      <origin xyz="0.0290255 0.0006539 -0.0664655" rpy="0. 0. 0."/>
+      <mass value="0.5724"/>
+      <inertia ixx="0.0011538" ixy="0.0000004" ixz="-0.0002679" iyy="0.0012744" iyz="0.0000004" izz="0.000691"/>
+    </inertial>
+    <visual>
+      <origin xyz="0. 0. 0." rpy="0. -0. 0."/>
+      <geometry>
+        <mesh filename="file:./meshes/scoop_visuals.obj" scale="1. 1. 1."/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. -0. 0."/>
+      <geometry>
+        <mesh filename="file:./meshes/scoop_collisions.obj" scale="1. 1. 1."/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="test_bench"/>
+  <link name="tiltboom">
+    <inertial>
+      <origin xyz="0.0931554 -0.0000594 0.0146127" rpy="0. 0. 0."/>
+      <mass value="0.7769"/>
+      <inertia ixx="0.0004015" ixy="-0.0000003" ixz="0.0008219" iyy="0.007241" iyz="-0.0000003" izz="0.0069766"/>
+    </inertial>
+    <visual>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="file:./meshes/tiltboom_visuals.obj" scale="1. 1. 1."/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <geometry>
+        <mesh filename="file:./meshes/tiltboom_collisions.obj" scale="1. 1. 1."/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

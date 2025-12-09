@@ -1,212 +1,285 @@
-import casadi as csd
-import excavatorConstants as C
-from excavatorModel import motorTorqueLimit
-import matplotlib.pyplot as plt
 import os
-import cv2
+import numpy as np
+import matplotlib.pyplot as plt
 
-plt.rcParams["figure.dpi"] = 300
-visFolder = './Python/Plots/'
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (required for 3D)
+import math
+import excavatorConstants as C
 
-# Utils
-def rotMat(theta):
-    return csd.vertcat(csd.horzcat(csd.cos(theta), -csd.sin(theta)),
-                       csd.horzcat(csd.sin(theta), csd.cos(theta)))
+# Link lengths taken from excavatorConstants (based on old URDF)
+LEN_BA = float(C.lenBA)
+LEN_AL = float(C.lenAL)
+LEN_LM = float(C.lenLM)
+TOTAL_LEN = LEN_BA + LEN_AL + LEN_LM
 
-def transMat(theta, pos):
-    return csd.vertcat(csd.horzcat(rotMat(theta), pos),
-                       csd.horzcat(0, 0, 1))
+# Try to use OpenCV if available (for video creation)
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+    print("visualisation.py: OpenCV (cv2) not installed – video export disabled.")
 
-# Plotting
-def plotExcavator(ax, q, **kwargs):
-    alpha = q[0]
-    beta = q[1]
-    gamma = q[2]
+# === Output folder configuration ===
+# Absolute path to this script's directory
+SCRIPT_DIR = os.path.dirname(__file__)
 
-    color = 'default'
-    alphaTransparency = 0
-    extF = None
-    if 'color' in kwargs.keys():
-        color = kwargs['color']
-    if 'alpha' in kwargs.keys():
-        alphaTransparency = kwargs['alpha']
-    if 'extF' in kwargs.keys():
-        extF = kwargs['extF']
+# Store all frames/plots inside a "Plots" folder next to this file
+visFolder = os.path.join(SCRIPT_DIR, "Plots")
+os.makedirs(visFolder, exist_ok=True)
+print(f"visualisation.py: Output folder = {visFolder}")
 
-    # Boom
-    iBA = rotMat(alpha)@C.bBA
-    iBD = rotMat(alpha)@C.bBD
-    iBE = rotMat(alpha)@C.bBE
 
-    temp = [iBD, iBA, iBE]
-    xBoom = [0]
-    yBoom = [0]
-    for pos in temp:
-        xBoom += [pos[0].__float__()]
-        yBoom += [pos[1].__float__()]
-    if color == 'default':
-        ax.fill(xBoom, yBoom, facecolor='yellow', edgecolor='orange', linewidth=1)
-        plt.plot([C.iBC[0].__float__(), iBD[0].__float__()], [C.iBC[1].__float__(), iBD[1].__float__()], color='r', linewidth=1)
+def _to_numpy(x):
+    """Convert CasADi / list / array to 1D NumPy array of floats."""
+    if x is None:
+        return None
+    arr = np.array(x, dtype=float)
+    return arr
+
+
+def visualise(x, _, q_desired, t, k, ext_force):
+    """
+    Save a 3D snapshot of the excavator configuration for frame k.
+
+    This uses a simple 3-link planar model (boom–arm–bucket) with link
+    lengths taken from excavatorConstants (LEN_BA, LEN_AL, LEN_LM).
+    The arm lies in the X–Z plane (Y = 0) and is drawn as a 3D skeleton.
+
+    Parameters
+    ----------
+    x : state vector [q1, q2, q3, q1dot, q2dot, q3dot]
+        May be CasADi DM or NumPy.
+    _ : unused (kept for compatibility with original signature)
+    q_desired : desired joint configuration (optional)
+    t : float, current time [s]
+    k : int, frame index
+    ext_force : external force (ignored here, kept for compatibility)
+    """
+    def _link_positions_3d(q):
+        """Return 4×3 array of [x, y, z] for base, boom end, arm end, tip."""
+        alpha, beta, gamma = float(q[0]), float(q[1]), float(q[2])
+
+        # base
+        p0 = np.array([0.0, 0.0, 0.0])
+
+        # boom end
+        p1 = p0 + np.array([LEN_BA * math.cos(alpha), 0.0,
+                            LEN_BA * math.sin(alpha)])
+
+        # arm end
+        p2 = p1 + np.array([LEN_AL * math.cos(alpha + beta), 0.0,
+                            LEN_AL * math.sin(alpha + beta)])
+
+        # bucket tip
+        p3 = p2 + np.array([LEN_LM * math.cos(alpha + beta + gamma), 0.0,
+                            LEN_LM * math.sin(alpha + beta + gamma)])
+
+        return np.vstack([p0, p1, p2, p3])
+
+    # Convert state to NumPy
+    x_np = _to_numpy(x).reshape(-1)
+    q = x_np[:3]
+
+    pts = _link_positions_3d(q)
+    X, Y, Z = pts[:, 0], pts[:, 1], pts[:, 2]
+
+    fig = plt.figure(figsize=(6, 5))
+    ax = fig.add_subplot(111, projection="3d")
+    fig.suptitle(f"Excavator (3D skeleton)  t = {t:.2f} s  frame = {k}")
+
+    # Plot current configuration
+    ax.plot(X, Y, Z, "-o", label="current")
+
+    # Optionally plot desired configuration as dashed line
+    if q_desired is not None:
+        try:
+            qd = _to_numpy(q_desired).reshape(-1)[:3]
+            pts_d = _link_positions_3d(qd)
+            Xd, Yd, Zd = pts_d[:, 0], pts_d[:, 1], pts_d[:, 2]
+            ax.plot(Xd, Yd, Zd, "--o", label="desired")
+        except Exception:
+            pass
+
+    # Draw a simple ground line along X at Z=0
+    L = TOTAL_LEN + 0.5
+    ax.plot([0, L], [0, 0], [0, 0], "k--", linewidth=1)
+
+    # Axis limits so the whole arm stays in view
+    ax.set_xlim(0, L)
+    ax.set_ylim(-1.0, 1.0)
+    ax.set_zlim(-0.5, L)
+
+    ax.set_xlabel("X [m]")
+    ax.set_ylabel("Y [m]")
+    ax.set_zlabel("Z [m]")
+
+    ax.view_init(elev=25, azim=-60)
+    ax.legend(loc="upper left")
+
+    save_path = os.path.join(visFolder, f"Excavator_{k}.jpg")
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close(fig)
+
+    if k % 10 == 0:
+        print(f"visualisation.py: Saved 3D frame {k} to {save_path}")
+
+
+def _pick_series(x=None, u=None, motorTorque=None, motorVel=None, motorPower=None):
+    """
+    Helper: choose one of the provided arrays as the main time series.
+    """
+    if x is not None:
+        return np.array(x, dtype=float), "x"
+    if u is not None:
+        return np.array(u, dtype=float), "u"
+    if motorTorque is not None:
+        return np.array(motorTorque, dtype=float), "motorTorque"
+    if motorVel is not None:
+        return np.array(motorVel, dtype=float), "motorVel"
+    if motorPower is not None:
+        return np.array(motorPower, dtype=float), "motorPower"
+    return None, None
+
+
+def graph(t_start, t_end, interval, title, ylabel,
+          x=None, u=None, motorTorque=None, motorVel=None, motorPower=None):
+    """
+    Generic time-series plotting function used by MPCSimulation.
+
+    It expects one of x, u, motorTorque, motorVel, motorPower to be non-None.
+    Each is interpreted as a (n_series, N_steps) or (N_steps, n_series) array.
+    """
+    series, key = _pick_series(
+        x=x,
+        u=u,
+        motorTorque=motorTorque,
+        motorVel=motorVel,
+        motorPower=motorPower,
+    )
+
+    if series is None:
+        print(f"[graph] No data provided for '{title}', skipping.")
+        return
+
+    series = np.array(series, dtype=float)
+    # Make sure shape is (n_series, N_steps)
+    if series.ndim == 1:
+        series = series.reshape(1, -1)
+    elif series.shape[0] > series.shape[1]:
+        # Assume we want rows = series
+        pass
     else:
-        ax.fill(xBoom, yBoom, facecolor='none', edgecolor=color, linewidth=1, alpha=alphaTransparency)
-        plt.plot([C.iBC[0].__float__(), iBD[0].__float__()], [C.iBC[1].__float__(), iBD[1].__float__()], color=color, linewidth=1, alpha=alphaTransparency)
+        # Heuristic: if we have fewer rows than columns, treat rows as series
+        pass
 
-    # Arm
-    iBF = transMat(alpha + beta, iBA)@csd.vertcat(C.aAF, 1)
-    iBF = iBF[0:2]
-    iBG = transMat(alpha + beta, iBA)@csd.vertcat(C.aAG, 1)
-    iBG = iBG[0:2]
-    iBJ = transMat(alpha + beta, iBA)@csd.vertcat(C.aAJ, 1)
-    iBJ = iBJ[0:2]
-    iBL = transMat(alpha + beta, iBA)@csd.vertcat(C.aAL, 1)
-    iBL = iBL[0:2]
+    n_steps = series.shape[1]
+    t = np.linspace(t_start, t_end, n_steps)
 
-    temp = [iBA, iBJ, iBL, iBG, iBF, iBA]
-    xBoom = []
-    yBoom = []
-    for pos in temp:
-        xBoom += [pos[0].__float__()]
-        yBoom += [pos[1].__float__()]
-    if color == 'default':
-        ax.fill(xBoom, yBoom, facecolor='yellow', edgecolor='orange', linewidth=1)
-    else:
-        ax.fill(xBoom, yBoom, facecolor='none', edgecolor=color, linewidth=1, alpha=alphaTransparency)
+    fig, ax = plt.subplots(figsize=(6, 3))
+    for i in range(series.shape[0]):
+        ax.plot(t, series[i, :], linewidth=1, label=f"{key}[{i}]")
 
-    R = 2*C.lenJG # R formula (sin version)
-    theta = csd.atan2(C.aJG[0], C.aJG[1])
-    lenBucket = 0.0048*gamma**4 + 0.0288*gamma**3 + 0.0225*gamma**2 - 0.1695*gamma + 0.9434
-    angLJH = csd.asin((-lenBucket**2 + C.lenHJ**2 + C.lenJG**2)/(R*C.lenHJ)) - theta
-    aAH = transMat(angLJH, C.aAJ)@csd.vertcat(C.lenHJ, 0, 1)
-    aAH = aAH[0:2]
-    iBH = transMat(alpha + beta, iBA)@csd.vertcat(aAH, 1)
-    iBH = iBH[0:2]
-    if color == 'default':
-        plt.plot([iBE[0].__float__(), iBF[0].__float__()], [iBE[1].__float__(), iBF[1].__float__()], color='r', linewidth=1)
-        plt.plot([iBG[0].__float__(), iBH[0].__float__()], [iBG[1].__float__(), iBH[1].__float__()], color='r', linewidth=1)
-        plt.plot([iBJ[0].__float__(), iBH[0].__float__()], [iBJ[1].__float__(), iBH[1].__float__()], color='k', linewidth=1)
-    else:
-        plt.plot([iBE[0].__float__(), iBF[0].__float__()], [iBE[1].__float__(), iBF[1].__float__()], color=color, linewidth=1, alpha=alphaTransparency)
-        plt.plot([iBG[0].__float__(), iBH[0].__float__()], [iBG[1].__float__(), iBH[1].__float__()], color=color, linewidth=1, alpha=alphaTransparency)
-        plt.plot([iBJ[0].__float__(), iBH[0].__float__()], [iBJ[1].__float__(), iBH[1].__float__()], color=color, linewidth=1, alpha=alphaTransparency)
-
-    # Bucket
-    iBK = transMat(alpha + beta + gamma, iBL)@csd.vertcat(C.lLK, 1)
-    iBK = iBK[0:2]
-    iBM = transMat(alpha + beta + gamma, iBL)@csd.vertcat(C.lLM, 1)
-    iBM = iBM[0:2]
-
-    temp = [iBL, iBM, iBK, iBL]
-    xBoom = []
-    yBoom = []
-    for pos in temp:
-        xBoom += [pos[0].__float__()]
-        yBoom += [pos[1].__float__()]
-    if color == 'default':
-        ax.fill(xBoom, yBoom, facecolor='yellow', edgecolor='orange', linewidth=1)
-        plt.plot([iBH[0].__float__(), iBK[0].__float__()], [iBH[1].__float__(), iBK[1].__float__()], color='k', linewidth=1)
-    else:
-        ax.fill(xBoom, yBoom, facecolor='none', edgecolor=color, linewidth=1, alpha=alphaTransparency)
-        plt.plot([iBH[0].__float__(), iBK[0].__float__()], [iBH[1].__float__(), iBK[1].__float__()], color=color, linewidth=1, alpha=alphaTransparency)
-
-    # Force
-    if extF is not None:
-        iBCoMBucket = transMat(alpha + beta + gamma, iBL)@csd.vertcat(C.lCoMBucket[0]*0.75, C.lCoMBucket[0]*0.25, 1)
-        iBCoMBucket = iBCoMBucket[0:2]
-        xArrow = 0.5*extF[0]/csd.sqrt(extF[0]**2 + extF[1]**2)
-        yArrow = 0.5*extF[1]/csd.sqrt(extF[0]**2 + extF[1]**2)
-        plt.arrow(iBCoMBucket[0].__float__(), iBCoMBucket[1].__float__(), xArrow, yArrow, fc='k', head_width=0.05)
-
-def visualise(q, qOld, qDes, t, k, extF):
-    fig, ax = plt.subplots()
-
-    if qOld is not None:
-        plotExcavator(ax, qOld, color='k', alpha=0.2)
-    if qDes is not None:
-        plotExcavator(ax, qDes, color='lime', alpha=0.2)
-    if extF is not None:
-        plotExcavator(ax, q, extF=extF)
-    else:
-        plotExcavator(ax, q)
-
-    # Ground
-    plt.axhline(y=C.yGround, color='g', linewidth=1)
-
-    plt.xlim([-1, 4])
-    plt.ylim([-2, 3])
-    ax.set_aspect('equal')
-    ax.set_title("t = {t} s, k = {k}".format(t=round(t, 1), k=k))
-    plt.savefig(visFolder + "Excavator_{y}.jpg".format(y=k))
-    plt.close()
-
-def createVideo(kStart, kEnd, name, fps):
-    videoName = visFolder + "{name}.mp4".format(name=name)
-    imgs = []
-
-    k = kStart
-    while "Excavator_{k}.jpg".format(k=k) in os.listdir(visFolder) and k <= kEnd:
-        imgs += ["Excavator_{k}.jpg".format(k=k)]
-        k += 1
-
-    frame = cv2.imread(os.path.join(visFolder, imgs[0]))
-    height, width, layers = frame.shape
-
-    video = cv2.VideoWriter(videoName, cv2.VideoWriter_fourcc(*'avc1'), fps, (width, height))
-
-    # Appending the images to the video one by one
-    for img in imgs:
-        video.write(cv2.imread(os.path.join(visFolder, img)))
-
-    # Deallocating memories taken for window creation
-    cv2.destroyAllWindows()
-    video.release()  # releasing the video generated
-
-def graph(tStart, tEnd, interval, title, ylabel, **kwargs):
-    n = (tEnd - tStart)/interval
-    x = csd.linspace(tStart, tEnd, int(n + 1))
-
-    fig, ax = plt.subplots()
-    for label, y in kwargs.items():
-        if y.ndim == 1:
-            if y.shape[0] == n + 1:
-                plt.plot(x, y, label="{label}".format(label=label) , linewidth=1)
-            elif y.shape[0] == n:
-                plt.plot(x[1:], y, label="{label}".format(label=label) , linewidth=1)
-        elif y.ndim == 2:
-            for row in range(y.shape[0]):
-                if y.shape[1] == n + 1:
-                    #plt.plot(x, y[row, :], label="{label}{row}".format(label=label, row=row) , linewidth=1)
-                    plt.plot(x, y[row, :], linewidth=1)
-                elif y.shape[1] == n:
-                    #plt.plot(x[1:], y[row, :], label="{label}{row}".format(label=label, row=row) , linewidth=1)
-                    plt.plot(x[1:], y[row, :], linewidth=1)
-
-    ax.legend()
     ax.set_title(title)
-    plt.xlabel('Time (s)')
-    plt.ylabel(ylabel)
-    if y.ndim == 2:
-        plt.legend(['Boom', 'Arm', 'Bucket'], bbox_to_anchor=(1.04, 1), loc='upper left')
-    plt.savefig(visFolder + "Graph_{title}.jpg".format(title=title), bbox_inches='tight')
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel(ylabel)
+    ax.grid(True, alpha=0.3)
+
+    # Default legend outside if many series
+    if series.shape[0] <= 3:
+        ax.legend()
+    else:
+        ax.legend(bbox_to_anchor=(1.04, 1), loc="upper left", fontsize=8)
+
+    save_path = os.path.join(visFolder, f"Graph_{title.replace(' ', '_')}.png")
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=200)
     plt.close()
+    print(f"visualisation.py: Saved graph '{title}' to {save_path}")
+
 
 def plotMotorOpPt(motorTorque, motorVel, dutyCycle):
-    fig, ax = plt.subplots()
+    """
+    Plot motor operating points (torque vs velocity) and save to Plots/.
+    """
+    from excavatorModel import motorTorqueLimit
 
-    angVel = []
-    torqueLimit = []
+    motorTorque = np.array(motorTorque, dtype=float)
+    motorVel = np.array(motorVel, dtype=float)
 
-    for w in range(0, 472, 1):
-        angVel += [w]
-        torqueLimit += [motorTorqueLimit(w, dutyCycle)]
+    fig, ax = plt.subplots(figsize=(5, 4))
 
-    ax.plot(angVel, torqueLimit, 'r--', linewidth=1)
+    # Draw torque limit curve
+    angVel = np.linspace(0, 471.24, 200)
+    torqueLimit = [motorTorqueLimit(w, dutyCycle) for w in angVel]
+    ax.plot(angVel, torqueLimit, "r--", linewidth=1, label="Torque limit")
 
-    for k in range(3):
-        ax.plot(abs(motorVel[k]), abs(motorTorque[k]), linewidth=1)
+    # Plot operating points for each joint
+    n_joints = motorTorque.shape[0]
+    labels = ["Boom", "Arm", "Bucket"]
+    for j in range(n_joints):
+        ax.plot(
+            np.abs(motorVel[j, :]),
+            np.abs(motorTorque[j, :]),
+            linewidth=1,
+            label=labels[j] if j < len(labels) else f"Joint {j}",
+        )
 
-    ax.set_title("Motor Operating Curves")
-    plt.xlabel('Motor velocity ($\mathsf{rad\ s^{-1}}$)')
-    plt.ylabel('Motor torque (Nm)')
-    plt.legend(['Torque Limit', 'Boom', 'Arm', 'Bucket'], bbox_to_anchor=(1.04, 1), loc='upper left')
-    plt.savefig(visFolder + "Motor Operating Points.jpg", bbox_inches='tight')
+    ax.set_title(f"Motor operating points ({dutyCycle})")
+    plt.xlabel(r"Motor velocity ($\mathsf{rad\ s^{-1}}$)")
+    plt.ylabel("Motor torque (Nm)")
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=8)
+
+    save_path = os.path.join(visFolder, "Motor_Operating_Points.png")
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=200)
     plt.close()
+    print(f"visualisation.py: Saved motor operating plot to {save_path}")
+
+
+def createVideo(k_start, k_end, name, fps):
+    """
+    Create an MP4 video from saved Excavator_k.jpg frames in visFolder.
+    """
+    if not HAS_CV2:
+        print("createVideo: cv2 not available, skipping video creation.")
+        return
+
+    # Collect existing frames
+    frame_files = []
+    for k in range(k_start, k_end + 1):
+        frame_path = os.path.join(visFolder, f"Excavator_{k}.jpg")
+        if os.path.exists(frame_path):
+            frame_files.append(frame_path)
+
+    if not frame_files:
+        print("createVideo: No frames found, skipping.")
+        return
+
+    # Read first frame to get size
+    first = cv2.imread(frame_files[0])
+    if first is None:
+        print("createVideo: Failed to read first frame, aborting.")
+        return
+    height, width, _ = first.shape
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    video_path = os.path.join(visFolder, f"{name}.mp4")
+    writer = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
+
+    for k in range(k_start, k_end):
+        frame_path = os.path.join(visFolder, f"Excavator_{k}.jpg")
+        if not os.path.exists(frame_path):
+            continue
+        img = cv2.imread(frame_path)
+        if img is None:
+            continue
+        # Ensure size consistent
+        if img.shape[0] != height or img.shape[1] != width:
+            img = cv2.resize(img, (width, height))
+        writer.write(img)
+
+    writer.release()
+    print(f"visualisation.py: Video saved to: {video_path}")

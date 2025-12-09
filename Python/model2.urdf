@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="model2">
+  <joint name="FixedJoint" type="fixed">
+    <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+    <parent link="excavator"/>
+    <child link="ground_point"/>
+  </joint>
+  <joint name="revolute_cabin" type="revolute">
+    <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+    <parent link="ground_point"/>
+    <child link="upper_carriage"/>
+    <axis xyz="0. 0. 1."/>
+    <limit lower="-0.8726646" upper="0.8726646" effort="100." velocity="1.0471976"/>
+  </joint>
+  <link name="excavator"/>
+  <link name="ground_point">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="0.001"/>
+      <inertia ixx="0.000004" ixy="0." ixz="0." iyy="0.000004" iyz="0." izz="0.000004"/>
+    </inertial>
+  </link>
+  <link name="upper_carriage">
+    <inertial>
+      <origin xyz="0. 0. 0." rpy="0. 0. 0."/>
+      <mass value="15."/>
+      <inertia ixx="0.001" ixy="0." ixz="0." iyy="0.001" iyz="0." izz="0.001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0. 0. 0." rpy="0. 0. -1.5707964"/>
+      <geometry>
+        <mesh filename="file:///home/jack/Desktop/Excavator/meshes/upper_carriage_Mesh.obj" scale="1. 1. 1."/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0. 0. 0." rpy="0. 0. -1.5707964"/>
+      <geometry>
+        <mesh filename="file:///home/jack/Desktop/Excavator/meshes/upper_carriage_Mesh.obj" scale="1. 1. 1."/>
+      </geometry>
+    </collision>
+  </link>
+</robot>
