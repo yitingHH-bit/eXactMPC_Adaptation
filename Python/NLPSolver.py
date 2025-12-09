@@ -11,7 +11,7 @@ N = 20           # number of intervals
 Ts = T / N       # sampling time
 
 # Debug 标志：True 时忽略电机相关的约束（扭矩/转速/功率），先保证 MPC 能跑通
-DEBUG_IGNORE_MOTOR_LIMITS = False  # 先设 True 调试
+DEBUG_IGNORE_MOTOR_LIMITS = False  # 先设 True 调试 
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +36,6 @@ def integrator(x, u, t):
         x[4] + u[1] * t,
         x[5] + u[2] * t,
     )
-
 
 # ---------------------------------------------------------------------------
 # Nonlinear MPC problem (CasADi Opti)
@@ -220,31 +219,53 @@ class NLP:
     # ------------------------------------------------------------------
     # Solve the NLP for given initial state and desired tip pose
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Solve the NLP for given initial state and desired tip pose
+    # ------------------------------------------------------------------
     def solveNLP(self, x0, poseDesired):
-        # Set parameter values
-        self.opti.set_value(self.x0, x0)
-        self.opti.set_value(self.poseDesired, poseDesired)
+        """
+        x0          : 当前状态 [q; qdot]，可以是 DM 或 numpy
+        poseDesired : 期望末端姿态 [x, y, theta] (我们这里 y=平面高度)
+        """
+        # 统一转成 DM，避免 DM / numpy 混算出 MX
+        x0_dm = csd.DM(x0)
+        pose_dm = csd.DM(poseDesired)
 
-        # Initial guess for state trajectory
-        qDesired = mod.inverseKinematics(poseDesired)
+        # 设置参数
+        self.opti.set_value(self.x0, x0_dm)
+        self.opti.set_value(self.poseDesired, pose_dm)
 
+        # 期望关节角（IK）
+        qDesired = mod.inverseKinematics(pose_dm)
+
+        # ---- 检查 IK 结果是否包含 NaN / Inf ----
+        import numpy as _np
+        qDes_np = _np.array(qDesired, dtype=float).reshape(-1)
+        if not _np.all(_np.isfinite(qDes_np)):
+            raise RuntimeError(
+                "inverseKinematics produced NaN/Inf — target pose is likely unreachable."
+            )
+
+        qDesired_dm = csd.DM(qDesired)
+
+        # ---- 初值轨迹：从 x0 平滑插到 qDesired ----
         for k in range(N):
             alpha = (k + 1) / N
-            q0 = x0[0:3]
-            qGuess = alpha * (qDesired - q0) + q0
-            qDotGuess = (qDesired - q0) / T
+            q0 = x0_dm[0:3]
+            qGuess = alpha * (qDesired_dm - q0) + q0
+            qDotGuess = (qDesired_dm - q0) / T
 
             self.opti.set_initial(
                 self.x[:, k],
                 csd.vertcat(qGuess, qDotGuess),
             )
 
-        # 最后一帧给个简单初值
+        # 终点帧：到达 qDesired，速度 0
         self.opti.set_initial(
             self.x[:, N],
-            csd.vertcat(qDesired, csd.DM.zeros(3, 1)),
+            csd.vertcat(qDesired_dm, csd.DM.zeros(3, 1)),
         )
 
-        # Solve
+        # 求解
         sol = self.opti.solve()
         return sol
